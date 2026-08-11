@@ -783,7 +783,7 @@ The package must not depend on `pi-subagents` for version 0.1.
 
 ## 23. Testing requirements
 
-The second implementation pass adds Pi RPC smoke tests in addition to the dependency-free unit tests. These tests use temporary Git repositories and verify extension loading, dirty-repository refusal, and clean-repository entry into analysis.
+The second implementation pass adds Pi RPC smoke tests in addition to the dependency-free unit tests. These tests use temporary Git repositories and verify extension loading, dirty-repository refusal, clean-repository entry into analysis, session restoration, and a complete lifecycle with a deterministic test provider. The test provider must remain outside the production package resources and must never contact a real model endpoint.
 
 ### 23.1 Unit tests
 

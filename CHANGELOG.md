@@ -11,4 +11,5 @@ All notable changes to this project will be documented in this file.
 - Add branch-type and issue-number inference plus guarded commit delivery helpers.
 - Add persisted-session restoration coverage through a synthetic Pi session file.
 - Extract deterministic phase-signal orchestration and cover the complete review/fix/validation path.
+- Add a scripted-provider end-to-end test covering real Pi tool calls, branch creation, review fixes, validation, and commit creation.
 - License the project under the BSD Zero Clause License (0BSD).
