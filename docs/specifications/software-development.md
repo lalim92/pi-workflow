@@ -219,6 +219,7 @@ interface WorkflowState {
   reviewRound: number;
   openFindings: number;
   finalValidationPassed: boolean;
+  validationSummary: string;
   commit?: {
     hash: string;
     message: string;
