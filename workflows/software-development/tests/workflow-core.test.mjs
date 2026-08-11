@@ -5,8 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { inspectGitRepository } from "../lib/git-preflight.mjs";
-import { buildPullRequestBody, commitRepositoryChanges } from "../lib/git-delivery.mjs";
+import {
+  buildPullRequestBody,
+  commitRepositoryChanges,
+  findSuspiciousFiles,
+  parseChangedFiles,
+} from "../lib/git-delivery.mjs";
 import { applyWorkflowSignal } from "../lib/workflow-engine.mjs";
+import { discoverValidationCommands, formatValidationSummary, runValidationCommands } from "../lib/validation.mjs";
 import {
   branchName,
   branchNameFromRequest,
@@ -135,6 +141,14 @@ test("accepts a clean Git repository during pre-flight", async () => {
   }
 });
 
+test("parses changed paths and rejects obvious generated files", () => {
+  assert.deepEqual(parseChangedFiles(" M src/app.ts\n?? .DS_Store\nR  old.ts -> new.ts\n"), ["src/app.ts", ".DS_Store", "new.ts"]);
+  assert.deepEqual(findSuspiciousFiles(["src/app.ts", ".DS_Store", "coverage/summary.json", "notes.md"]), [
+    ".DS_Store",
+    "coverage/summary.json",
+  ]);
+});
+
 test("commits only on the expected branch", async () => {
   const directory = createGitFixture();
   try {
@@ -149,6 +163,22 @@ test("commits only on the expected branch", async () => {
 
     const clean = gitRunner(["status", "--porcelain=v1"], directory);
     assert.equal(clean.stdout, "");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses to commit suspicious generated files", async () => {
+  const directory = createGitFixture();
+  try {
+    writeFileSync(join(directory, ".DS_Store"), "generated\n");
+    const result = await commitRepositoryChanges(gitRunner, directory, {
+      expectedBranch: "main",
+      message: "feat: should not include artifacts",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "suspicious_files");
+    assert.match(result.message, /\.DS_Store/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -169,6 +199,38 @@ test("refuses to commit when the branch changed", async () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("discovers validation scripts from a project package", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-workflow-validation-"));
+  try {
+    writeFileSync(join(directory, "package.json"), JSON.stringify({
+      scripts: { test: "node --test", lint: "eslint .", build: "tsc" },
+    }));
+    const validation = discoverValidationCommands(directory);
+    assert.deepEqual(validation.commands.map((command) => command.args), [
+      ["test"],
+      ["run", "lint"],
+      ["run", "build"],
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("runs validation commands and formats their evidence", async () => {
+  const calls = [];
+  const validation = await runValidationCommands(async (args) => {
+    calls.push(args);
+    return { code: args[0] === "fail" ? 1 : 0, stdout: "ok", stderr: "", killed: false };
+  }, "/tmp/project", [
+    { label: "first", args: ["first"] },
+    { label: "second", args: ["fail"] },
+    { label: "third", args: ["third"] },
+  ]);
+  assert.equal(validation.ok, false);
+  assert.deepEqual(calls, [["first"], ["fail"]]);
+  assert.match(formatValidationSummary(validation), /second: failed \(1\)/);
 });
 
 test("builds a pull request body with the delivery context", () => {

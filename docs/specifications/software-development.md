@@ -582,7 +582,7 @@ Out-of-scope findings must be included in the final summary as deferred work.
 
 ## 15. Final validation
 
-Final validation must be based on project guidelines and the approved plan.
+Final validation must be based on project guidelines and the approved plan. The agent may propose or run commands during its final-validation turn, but the extension must independently execute the discovered project validation commands before allowing a commit. At minimum, the extension runs `git diff --check`.
 
 The workflow should run, when available:
 
@@ -601,9 +601,9 @@ Validation commands must be reported with:
 - relevant output or failure summary;
 - whether the command directly exercised the changed code.
 
-A failed required validation blocks automatic commit.
+A failed required validation blocks automatic commit. Obvious generated or temporary artifacts such as `.DS_Store`, `node_modules/`, `coverage/`, `.cache/`, `.log`, or `.tmp` files also block automatic commit until they are removed or intentionally handled.
 
-If no automated tests exist, the workflow must state that fact and use the best available validation, such as build, typecheck, targeted execution, or documented manual verification.
+If no automated tests exist, the workflow must state that fact and use the best available validation, such as build, typecheck, targeted execution, or documented manual verification. In that case, `git diff --check` remains the minimum automated validation.
 
 ## 16. Commit
 

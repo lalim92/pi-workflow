@@ -38,7 +38,7 @@ docs/
 
 ## Status
 
-The repository contains the package scaffolding, detailed specifications, the functional extension, phase prompts, an on-demand skill, unit tests, and Pi RPC smoke tests. The implementation is still under active development and has not been released as a stable version.
+The repository contains the package scaffolding, detailed specifications, the functional extension, phase prompts, an on-demand skill, unit tests, Pi RPC smoke tests, a deterministic Pi end-to-end test, and CI coverage. The implementation is still under active development and has not been released as a stable version.
 
 ## Installation
 

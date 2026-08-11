@@ -1,3 +1,25 @@
+export function parseChangedFiles(statusOutput = "") {
+  return statusOutput
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.slice(3).split(" -> ").at(-1).trim())
+    .filter(Boolean);
+}
+
+export function findSuspiciousFiles(files = []) {
+  return files.filter((file) => {
+    const normalized = file.replaceAll("\\", "/");
+    return normalized === ".DS_Store"
+      || normalized.endsWith("/.DS_Store")
+      || normalized.startsWith("node_modules/")
+      || normalized.includes("/node_modules/")
+      || normalized.startsWith("coverage/")
+      || normalized.includes("/.cache/")
+      || normalized.endsWith(".log")
+      || normalized.endsWith(".tmp");
+  });
+}
+
 export async function commitRepositoryChanges(run, cwd, { expectedBranch, message }) {
   const branchResult = await run(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd);
   const currentBranch = branchResult.stdout.trim();
@@ -18,6 +40,18 @@ export async function commitRepositoryChanges(run, cwd, { expectedBranch, messag
   }
   if (!statusResult.stdout.trim()) {
     return { ok: false, reason: "no_changes", message: "Final validation passed but there are no changes to commit." };
+  }
+
+  const changedFiles = parseChangedFiles(statusResult.stdout);
+  const suspiciousFiles = findSuspiciousFiles(changedFiles);
+  if (suspiciousFiles.length > 0) {
+    return {
+      ok: false,
+      reason: "suspicious_files",
+      message: `Refusing to commit likely generated or temporary files: ${suspiciousFiles.join(", ")}.`,
+      changedFiles,
+      suspiciousFiles,
+    };
   }
 
   const diffCheck = await run(["diff", "--check"], cwd);
@@ -48,7 +82,7 @@ export async function commitRepositoryChanges(run, cwd, { expectedBranch, messag
     ok: true,
     hash: hashResult.stdout.trim(),
     message,
-    changedFiles: statusResult.stdout.trim().split("\n"),
+    changedFiles,
   };
 }
 

@@ -15,6 +15,7 @@ import {
 } from "../lib/workflow-core.mjs";
 import { inspectGitRepository } from "../lib/git-preflight.mjs";
 import { buildPullRequestBody, commitRepositoryChanges } from "../lib/git-delivery.mjs";
+import { discoverValidationCommands, formatValidationSummary, runValidationCommands } from "../lib/validation.mjs";
 
 const MAX_REVIEW_ROUNDS = 2;
 
@@ -179,7 +180,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
     notify(ctx, "Use /dev-workflow push to request push confirmation.");
   };
 
-  const handleSignal = (event: AgentEndEvent, ctx: ExtensionContext) => {
+  const handleSignal = async (event: AgentEndEvent, ctx: ExtensionContext) => {
     const signal = extractWorkflowSignal(event.messages);
     if (!signal) return;
 
@@ -192,6 +193,32 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
     if (signal === "IMPLEMENTATION_COMPLETE") {
       pendingCommitMessage = extractCommitMessage(event.messages) || pendingCommitMessage;
     }
+
+    if (signal === "VALIDATION_PASSED") {
+      const discovered = discoverValidationCommands(state.repositoryRoot);
+      const commands = [
+        { label: "git diff --check", args: ["diff", "--check"], script: "git-diff-check" },
+        ...discovered.commands,
+      ];
+      const validation = await runValidationCommands((args, cwd, timeout) => runGit(args, cwd, timeout), state.repositoryRoot, commands);
+      const validationSummary = formatValidationSummary(validation);
+      if (!validation.ok) {
+        const failed = validation.results.find((item) => item.code !== 0);
+        setState({
+          ...state,
+          phase: "blocked",
+          blockedFromPhase: "final_validation",
+          finalValidationPassed: false,
+          validationSummary,
+          lastError: `Required validation failed: ${failed?.label || "unknown command"}.`,
+          updatedAt: new Date().toISOString(),
+        });
+        notify(ctx, `Final validation failed. ${failed?.label || "A required command failed."} Resolve the failure and use /dev-workflow resume.`, "error");
+        return;
+      }
+      result.state.validationSummary = validationSummary;
+    }
+
     setState(result.state);
 
     if (result.action?.kind === "prompt") {
@@ -245,7 +272,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
 
   pi.on("agent_end", async (event, ctx) => {
     currentContext = ctx;
-    handleSignal(event, ctx);
+    await handleSignal(event, ctx);
     ctx.ui.setStatus("dev-workflow", state.phase === "idle" ? undefined : `workflow: ${state.phase}`);
   });
 
@@ -386,6 +413,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
         const title = state.commit.message;
         const body = buildPullRequestBody({
           requestSummary: state.requestSummary,
+          validationSummary: state.validationSummary,
           commitHash: state.commit.hash,
         });
         const confirmed = await ctx.ui.confirm("Create pull request", `Create a PR from ${state.workingBranch} to ${state.baseBranch}?\n\nTitle: ${title}`);

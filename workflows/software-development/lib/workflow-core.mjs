@@ -76,6 +76,7 @@ export function createInitialState(sessionId = "") {
     reviewRound: 0,
     openFindings: 0,
     finalValidationPassed: false,
+    validationSummary: "",
     commit: undefined,
     push: { attempted: false, completed: false },
     pullRequest: { attempted: false, completed: false },
