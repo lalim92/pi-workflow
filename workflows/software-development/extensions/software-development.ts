@@ -1,6 +1,5 @@
 import type { AgentEndEvent, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  CONTEXT_MESSAGE_TYPE,
   STATE_ENTRY_TYPE,
   branchName,
   compactPlan,
@@ -72,21 +71,12 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
   let state: WorkflowState = createInitialState();
   let pending: PendingAction;
   let pendingCommitMessage = "";
+  let currentContext: ExtensionContext | undefined;
 
   const setState = (next: WorkflowState) => {
     state = next;
     pi.appendEntry(STATE_ENTRY_TYPE, state);
-  };
-
-  const setPhase = (phase: WorkflowState["phase"], patch: Partial<WorkflowState> = {}) => {
-    try {
-      setState(transition(state, phase, patch));
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setState({ ...state, phase: "blocked", lastError: message, updatedAt: new Date().toISOString() });
-      return false;
-    }
+    currentContext?.ui.setStatus("dev-workflow", state.phase === "idle" ? undefined : `workflow: ${state.phase}`);
   };
 
   const runGit = (args: string[], cwd: string, timeout = 15_000) =>
@@ -105,7 +95,13 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
   };
 
   const block = (ctx: ExtensionContext, message: string) => {
-    setState({ ...state, phase: "blocked", lastError: message, updatedAt: new Date().toISOString() });
+    setState({
+      ...state,
+      phase: "blocked",
+      blockedFromPhase: state.phase,
+      lastError: message,
+      updatedAt: new Date().toISOString(),
+    });
     notify(ctx, message, "error");
   };
 
@@ -123,6 +119,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
       baseBranch: inspection.baseBranch,
       baseCommit: inspection.baseCommit,
       requestSummary: state.requestSummary,
+      blockedFromPhase: undefined,
       lastError: undefined,
     });
     setState(next);
@@ -151,6 +148,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
     const next = transition(state, "implementation", {
       workingBranch: candidate,
       planApproved: true,
+      blockedFromPhase: undefined,
       lastError: undefined,
     });
     setState(next);
@@ -191,6 +189,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
     setState(transition(state, "awaiting_push_confirmation", {
       finalValidationPassed: true,
       commit: { hash, message },
+      blockedFromPhase: undefined,
       lastError: undefined,
     }));
     notify(ctx, `Created commit ${hash.slice(0, 12)}: ${message}`);
@@ -215,7 +214,13 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
         }
         break;
       case "BLOCKED":
-        setState({ ...state, phase: "blocked", lastError: "The agent reported a blocking question or decision.", updatedAt: new Date().toISOString() });
+        setState({
+          ...state,
+          phase: "blocked",
+          blockedFromPhase: state.phase,
+          lastError: "The agent reported a blocking question or decision.",
+          updatedAt: new Date().toISOString(),
+        });
         notify(ctx, "The workflow is blocked. Resolve the question, then use /dev-workflow resume.", "warning");
         break;
       case "IMPLEMENTATION_COMPLETE":
@@ -256,7 +261,14 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
         break;
       case "VALIDATION_FAILED":
         if (state.phase === "final_validation") {
-          setState({ ...state, phase: "blocked", finalValidationPassed: false, lastError: "Required final validation failed.", updatedAt: new Date().toISOString() });
+          setState({
+            ...state,
+            phase: "blocked",
+            blockedFromPhase: "final_validation",
+            finalValidationPassed: false,
+            lastError: "Required final validation failed.",
+            updatedAt: new Date().toISOString(),
+          });
           notify(ctx, "Final validation failed. Resolve the failure and use /dev-workflow resume.", "error");
         }
         break;
@@ -264,6 +276,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
   };
 
   pi.on("session_start", (_event, ctx) => {
+    currentContext = ctx;
     state = latestPersistedState(ctx) || createInitialState(ctx.sessionManager.getSessionId());
     ctx.ui.setStatus("dev-workflow", state.phase === "idle" ? undefined : `workflow: ${state.phase}`);
     if (state.phase !== "idle" && state.phase !== "completed" && state.phase !== "aborted") {
@@ -297,6 +310,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    currentContext = ctx;
     handleSignal(event, ctx);
     ctx.ui.setStatus("dev-workflow", state.phase === "idle" ? undefined : `workflow: ${state.phase}`);
   });
@@ -320,6 +334,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
       return filtered.length ? filtered.map((value) => ({ value, label: value })) : null;
     },
     handler: async (args, ctx) => {
+      currentContext = ctx;
       const { action, value } = parseWorkflowCommand(args);
 
       if (action === "status") {
@@ -343,6 +358,8 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
           return;
         }
         state = createInitialState(ctx.sessionManager.getSessionId());
+        pending = undefined;
+        pendingCommitMessage = "";
         setState({ ...state, requestSummary: compactPlan(request, 1200) });
         pi.setSessionName(`Software development: ${request.trim().slice(0, 72)}`);
         if (await preflight(ctx)) sendPrompt(phasePrompt(state, "analysis"), ctx);
@@ -372,11 +389,25 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
 
       if (action === "resume") {
         if (state.phase === "blocked") {
-          const target = state.planApproved ? "implementation" : "analysis";
-          setState(transition(state, target, { lastError: undefined }));
+          const target = state.blockedFromPhase || (state.planApproved ? "implementation" : "analysis");
+          if (target === "preflight") {
+            if (await preflight(ctx)) sendPrompt(phasePrompt(state, "analysis"), ctx);
+            return;
+          }
+          if (!["analysis", "implementation", "review", "fixes", "final_validation", "awaiting_plan_approval", "awaiting_push_confirmation", "awaiting_pr_confirmation"].includes(target)) {
+            notify(ctx, `This workflow cannot be resumed from phase ${target}.`, "warning");
+            return;
+          }
+          setState(transition(state, target, { blockedFromPhase: undefined, lastError: undefined }));
         }
         if (["analysis", "implementation", "review", "fixes", "final_validation"].includes(state.phase)) {
           sendPrompt(phasePrompt(state, state.phase), ctx);
+        } else if (state.phase === "awaiting_plan_approval") {
+          notify(ctx, "The plan is ready for approval. Review it and use /dev-workflow approve.");
+        } else if (state.phase === "awaiting_push_confirmation") {
+          notify(ctx, "The commit is ready. Use /dev-workflow push to request confirmation.");
+        } else if (state.phase === "awaiting_pr_confirmation") {
+          notify(ctx, "The branch is pushed. Use /dev-workflow pr to request confirmation.");
         } else {
           notify(ctx, `This workflow cannot be resumed from phase ${state.phase}.`, "warning");
         }

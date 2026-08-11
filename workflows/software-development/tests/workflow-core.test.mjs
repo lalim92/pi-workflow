@@ -10,6 +10,7 @@ import {
   canTransition,
   compactPlan,
   createInitialState,
+  extractCommitMessage,
   extractWorkflowSignal,
   isMutatingShellCommand,
   normalizeBranchSlug,
@@ -45,11 +46,14 @@ test("creates an idle session state", () => {
   assert.equal(state.phase, "idle");
   assert.equal(state.sessionId, "session-1");
   assert.equal(state.planApproved, false);
+  assert.equal(state.blockedFromPhase, undefined);
 });
 
 test("allows the planned phase transitions and rejects invalid ones", () => {
   assert.equal(canTransition("idle", "preflight"), true);
   assert.equal(canTransition("awaiting_plan_approval", "implementation"), true);
+  assert.equal(canTransition("blocked", "preflight"), true);
+  assert.equal(canTransition("blocked", "awaiting_push_confirmation"), true);
   assert.equal(canTransition("review", "implementation"), false);
   assert.throws(() => transition(createInitialState(), "implementation"), /Invalid workflow transition/);
 });
@@ -119,22 +123,31 @@ test("blocks writes and publication during protected phases", () => {
   assert.match(shouldBlockTool("analysis", "write", { path: "x" }), /blocked/);
   assert.match(shouldBlockTool("review", "edit", { path: "x" }), /blocked/);
   assert.match(shouldBlockTool("implementation", "bash", { command: "git commit -m test" }), /blocked/);
+  assert.match(shouldBlockTool("awaiting_push_confirmation", "bash", { command: "git push origin feature/test" }), /blocked/);
   assert.equal(shouldBlockTool("implementation", "bash", { command: "npm test" }), undefined);
   assert.equal(shouldBlockTool("idle", "write", { path: "x" }), undefined);
 });
 
-test("extracts workflow signals from assistant content", () => {
+test("extracts only the last workflow signal from assistant content", () => {
   const messages = [
-    { role: "assistant", content: [{ type: "text", text: "Plan complete.\nWORKFLOW_STATUS: PLAN_READY" }] },
+    { role: "user", content: "WORKFLOW_STATUS: PLAN_READY" },
+    { role: "assistant", content: [{ type: "text", text: "I am still working.\nWORKFLOW_STATUS: VALIDATION_FAILED" }] },
+    { role: "assistant", content: "Validation is now complete. WORKFLOW_STATUS: VALIDATION_PASSED" },
   ];
-  assert.equal(extractWorkflowSignal(messages), "PLAN_READY");
-  assert.equal(extractWorkflowSignal([{ role: "assistant", content: "WORKFLOW_STATUS: VALIDATION_FAILED" }]), "VALIDATION_FAILED");
+  assert.equal(extractWorkflowSignal(messages), "VALIDATION_PASSED");
   assert.equal(extractWorkflowSignal([{ role: "assistant", content: "No marker" }]), undefined);
 });
 
-test("compacts long plans without changing short plans", () => {
+test("extracts commit messages only from assistant content", () => {
+  assert.equal(extractCommitMessage([
+    { role: "user", content: "WORKFLOW_COMMIT: should-not-be-used" },
+    { role: "assistant", content: "WORKFLOW_COMMIT: feat(auth): add login" },
+  ]), "feat(auth): add login");
+});
+
+test("compacts long plans within the requested limit", () => {
   assert.equal(compactPlan("  short plan  "), "short plan");
-  const compacted = compactPlan("x".repeat(100), 30);
+  const compacted = compactPlan("x".repeat(200), 100);
   assert.ok(compacted.length <= 100);
   assert.match(compacted, /truncated/);
 });

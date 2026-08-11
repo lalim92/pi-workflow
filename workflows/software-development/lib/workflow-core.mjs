@@ -30,7 +30,7 @@ const TRANSITIONS = new Map([
   ["awaiting_push_confirmation", new Set(["awaiting_pr_confirmation", "completed"])],
   ["awaiting_pr_confirmation", new Set(["completed"])],
   ["completed", new Set()],
-  ["blocked", new Set(["analysis", "implementation", "review", "fixes", "final_validation", "aborted"])],
+  ["blocked", new Set(["preflight", "analysis", "awaiting_plan_approval", "implementation", "review", "fixes", "final_validation", "awaiting_push_confirmation", "awaiting_pr_confirmation", "aborted"])],
   ["aborted", new Set()],
 ]);
 
@@ -80,6 +80,7 @@ export function createInitialState(sessionId = "") {
     push: { attempted: false, completed: false },
     pullRequest: { attempted: false, completed: false },
     lastError: undefined,
+    blockedFromPhase: undefined,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -180,40 +181,30 @@ export function extractTextFromMessage(message) {
 
 export function extractWorkflowSignal(messages = []) {
   const text = messages
+    .filter((message) => message && typeof message === "object" && message.role === "assistant")
     .map(extractTextFromMessage)
     .filter(Boolean)
     .join("\n");
 
-  const signals = [
-    "PLAN_READY",
-    "BLOCKED",
-    "IMPLEMENTATION_COMPLETE",
-    "REVIEW_NO_FINDINGS",
-    "REVIEW_FINDINGS",
-    "FIXES_COMPLETE",
-    "VALIDATION_PASSED",
-    "VALIDATION_FAILED",
-  ];
-
-  for (const signal of signals) {
-    if (new RegExp(`WORKFLOW_STATUS:\\s*${signal}\\b`, "i").test(text)) {
-      return signal;
-    }
-  }
-
-  return undefined;
+  const matches = [...text.matchAll(/WORKFLOW_STATUS:\s*(PLAN_READY|BLOCKED|IMPLEMENTATION_COMPLETE|REVIEW_NO_FINDINGS|REVIEW_FINDINGS|FIXES_COMPLETE|VALIDATION_PASSED|VALIDATION_FAILED)\b/gi)];
+  return matches.at(-1)?.[1].toUpperCase();
 }
 
 export function extractCommitMessage(messages = []) {
-  const text = messages.map(extractTextFromMessage).join("\n");
-  const match = text.match(/WORKFLOW_COMMIT:\s*(.+)/i);
+  const text = messages
+    .filter((message) => message && typeof message === "object" && message.role === "assistant")
+    .map(extractTextFromMessage)
+    .join("\n");
+  const match = text.match(/^WORKFLOW_COMMIT:\s*(.+)$/im);
   return match?.[1]?.trim().replace(/^`|`$/g, "");
 }
 
 export function compactPlan(text = "", maxLength = 6000) {
   const normalized = text.trim().replace(/\n{3,}/g, "\n\n");
   if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 80).trim()}\n\n[Plan summary truncated by workflow]`;
+  const suffix = "\n\n[Plan summary truncated by workflow]";
+  if (maxLength <= suffix.length) return normalized.slice(0, maxLength);
+  return `${normalized.slice(0, maxLength - suffix.length).trimEnd()}${suffix}`;
 }
 
 export function formatStatus(state) {
@@ -229,6 +220,7 @@ export function formatStatus(state) {
     `Push: ${state.push?.completed ? "completed" : state.push?.attempted ? "attempted" : "not attempted"}`,
     `PR: ${state.pullRequest?.completed ? state.pullRequest.url || "created" : state.pullRequest?.attempted ? "attempted" : "not attempted"}`,
   ];
+  if (state.blockedFromPhase) lines.push(`Blocked from: ${state.blockedFromPhase}`);
   if (state.lastError) lines.push(`Blocker: ${state.lastError}`);
   return lines.join("\n");
 }

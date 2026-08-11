@@ -232,6 +232,7 @@ interface WorkflowState {
     completed: boolean;
     url?: string;
   };
+  blockedFromPhase?: WorkflowPhase;
   lastError?: string;
   updatedAt: string;
 }
@@ -779,6 +780,8 @@ The initial implementation should prefer one extension file and a small number o
 The package must not depend on `pi-subagents` for version 0.1.
 
 ## 23. Testing requirements
+
+The second implementation pass adds Pi RPC smoke tests in addition to the dependency-free unit tests. These tests use temporary Git repositories and verify extension loading, dirty-repository refusal, and clean-repository entry into analysis.
 
 ### 23.1 Unit tests
 
