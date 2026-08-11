@@ -1,5 +1,11 @@
 # Tests
 
-Tests for the Software Development Workflow and its Pi extensions will live here.
+Tests for the Software Development Workflow and its Pi extensions live here.
 
-The test strategy will be defined alongside the workflow specification and should cover phase transitions, dirty-repository refusal, approval gates, Git protections, and non-interactive behavior where applicable.
+The current suite covers the dependency-free workflow core: phase transitions, command parsing, branch naming, shell mutation classification, tool protections, workflow signals, and plan compaction. Git integration and Pi-session tests will be added as the extension stabilizes.
+
+Run the tests from the repository root with:
+
+```bash
+npm test
+```

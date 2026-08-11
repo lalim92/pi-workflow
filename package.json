@@ -12,6 +12,9 @@
     "url": "https://github.com/lalim92/pi-workflow/issues"
   },
   "homepage": "https://github.com/lalim92/pi-workflow#readme",
+  "scripts": {
+    "test": "node --test workflows/software-development/tests/*.test.mjs"
+  },
   "keywords": [
     "pi-package",
     "pi",
