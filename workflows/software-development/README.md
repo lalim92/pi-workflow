@@ -19,4 +19,4 @@ This workflow provides a lightweight development lifecycle for Pi.
 - `skills/` will contain on-demand guidance that should not be loaded on every turn.
 - `tests/` will contain tests for the workflow behavior and extension logic.
 
-The workflow is not implemented yet. The specification is maintained in `docs/specifications/software-development.md`.
+The workflow is not implemented yet. Its proposed functional specification is maintained in `docs/specifications/software-development.md`.
