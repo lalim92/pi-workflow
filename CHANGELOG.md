@@ -10,4 +10,5 @@ All notable changes to this project will be documented in this file.
 - Add Pi RPC smoke tests and harden signal parsing, blocked-phase recovery, and session status updates.
 - Add branch-type and issue-number inference plus guarded commit delivery helpers.
 - Add persisted-session restoration coverage through a synthetic Pi session file.
+- Extract deterministic phase-signal orchestration and cover the complete review/fix/validation path.
 - License the project under the BSD Zero Clause License (0BSD).

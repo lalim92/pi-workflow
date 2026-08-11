@@ -1,4 +1,5 @@
 import type { AgentEndEvent, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { applyWorkflowSignal } from "../lib/workflow-engine.mjs";
 import {
   STATE_ENTRY_TYPE,
   branchNameFromRequest,
@@ -179,81 +180,32 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
   };
 
   const handleSignal = (event: AgentEndEvent, ctx: ExtensionContext) => {
-    if (!["analysis", "implementation", "review", "fixes", "final_validation"].includes(state.phase)) return;
     const signal = extractWorkflowSignal(event.messages);
     if (!signal) return;
-    const text = assistantText(event);
 
-    switch (signal) {
-      case "PLAN_READY":
-        if (state.phase === "analysis") {
-          setState(transition(state, "awaiting_plan_approval", {
-            planSummary: compactPlan(text),
-            planRevision: state.planRevision + 1,
-            lastError: undefined,
-          }));
-          notify(ctx, "Plan ready. Review it and use /dev-workflow approve to continue.");
-        }
-        break;
-      case "BLOCKED":
-        setState({
-          ...state,
-          phase: "blocked",
-          blockedFromPhase: state.phase,
-          lastError: "The agent reported a blocking question or decision.",
-          updatedAt: new Date().toISOString(),
-        });
-        notify(ctx, "The workflow is blocked. Resolve the question, then use /dev-workflow resume.", "warning");
-        break;
-      case "IMPLEMENTATION_COMPLETE":
-        if (state.phase === "implementation") {
-          pendingCommitMessage = extractCommitMessage(event.messages) || pendingCommitMessage;
-          setState(transition(state, "review", { reviewRound: state.reviewRound + 1, lastError: undefined }));
-          queuePrompt(phasePrompt(state, "review"));
-        }
-        break;
-      case "REVIEW_NO_FINDINGS":
-        if (state.phase === "review") {
-          setState(transition(state, "final_validation", { openFindings: 0, lastError: undefined }));
-          queuePrompt(phasePrompt(state, "final_validation"));
-        }
-        break;
-      case "REVIEW_FINDINGS":
-        if (state.phase === "review") {
-          setState(transition(state, "fixes", { openFindings: Math.max(1, state.openFindings), lastError: undefined }));
-          queuePrompt(phasePrompt(state, "fixes"));
-        }
-        break;
-      case "FIXES_COMPLETE":
-        if (state.phase === "fixes") {
-          if (state.reviewRound < MAX_REVIEW_ROUNDS) {
-            setState(transition(state, "review", { reviewRound: state.reviewRound + 1, lastError: undefined }));
-            queuePrompt(phasePrompt(state, "review"));
-          } else {
-            setState(transition(state, "final_validation", { openFindings: 0, lastError: undefined }));
-            queuePrompt(phasePrompt(state, "final_validation"));
-          }
-        }
-        break;
-      case "VALIDATION_PASSED":
-        if (state.phase === "final_validation") {
-          setState({ ...state, finalValidationPassed: true, updatedAt: new Date().toISOString() });
-          pending = { kind: "commit" };
-        }
-        break;
-      case "VALIDATION_FAILED":
-        if (state.phase === "final_validation") {
-          setState({
-            ...state,
-            phase: "blocked",
-            blockedFromPhase: "final_validation",
-            finalValidationPassed: false,
-            lastError: "Required final validation failed.",
-            updatedAt: new Date().toISOString(),
-          });
-          notify(ctx, "Final validation failed. Resolve the failure and use /dev-workflow resume.", "error");
-        }
-        break;
+    const result = applyWorkflowSignal(state, signal, {
+      planSummary: signal === "PLAN_READY" ? compactPlan(assistantText(event)) : undefined,
+      maxReviewRounds: MAX_REVIEW_ROUNDS,
+    });
+    if (!result.handled) return;
+
+    if (signal === "IMPLEMENTATION_COMPLETE") {
+      pendingCommitMessage = extractCommitMessage(event.messages) || pendingCommitMessage;
+    }
+    setState(result.state);
+
+    if (result.action?.kind === "prompt") {
+      queuePrompt(phasePrompt(state, result.action.phase));
+    } else if (result.action?.kind === "commit") {
+      pending = { kind: "commit" };
+    }
+
+    if (signal === "PLAN_READY") {
+      notify(ctx, "Plan ready. Review it and use /dev-workflow approve to continue.");
+    } else if (signal === "BLOCKED") {
+      notify(ctx, "The workflow is blocked. Resolve the question, then use /dev-workflow resume.", "warning");
+    } else if (signal === "VALIDATION_FAILED") {
+      notify(ctx, "Final validation failed. Resolve the failure and use /dev-workflow resume.", "error");
     }
   };
 

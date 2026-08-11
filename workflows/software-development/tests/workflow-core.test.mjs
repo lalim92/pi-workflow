@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { inspectGitRepository } from "../lib/git-preflight.mjs";
 import { buildPullRequestBody, commitRepositoryChanges } from "../lib/git-delivery.mjs";
+import { applyWorkflowSignal } from "../lib/workflow-engine.mjs";
 import {
   branchName,
   branchNameFromRequest,
@@ -58,6 +59,55 @@ test("allows the planned phase transitions and rejects invalid ones", () => {
   assert.equal(canTransition("blocked", "awaiting_push_confirmation"), true);
   assert.equal(canTransition("review", "implementation"), false);
   assert.throws(() => transition(createInitialState(), "implementation"), /Invalid workflow transition/);
+});
+
+test("runs the complete deterministic workflow signal sequence", () => {
+  let state = createInitialState("session-flow");
+  state = transition(state, "preflight");
+  state = transition(state, "analysis");
+
+  let result = applyWorkflowSignal(state, "PLAN_READY", { planSummary: "Add the feature" });
+  assert.equal(result.state.phase, "awaiting_plan_approval");
+  assert.equal(result.state.planRevision, 1);
+
+  state = transition(result.state, "implementation", { planApproved: true, workingBranch: "feature/add-the-feature" });
+  result = applyWorkflowSignal(state, "IMPLEMENTATION_COMPLETE");
+  assert.equal(result.state.phase, "review");
+  assert.deepEqual(result.action, { kind: "prompt", phase: "review" });
+
+  state = result.state;
+  result = applyWorkflowSignal(state, "REVIEW_FINDINGS");
+  assert.equal(result.state.phase, "fixes");
+  assert.deepEqual(result.action, { kind: "prompt", phase: "fixes" });
+
+  state = result.state;
+  result = applyWorkflowSignal(state, "FIXES_COMPLETE");
+  assert.equal(result.state.phase, "review");
+  assert.equal(result.state.reviewRound, 2);
+
+  state = result.state;
+  result = applyWorkflowSignal(state, "REVIEW_NO_FINDINGS");
+  assert.equal(result.state.phase, "final_validation");
+
+  result = applyWorkflowSignal(result.state, "VALIDATION_PASSED");
+  assert.equal(result.state.phase, "final_validation");
+  assert.equal(result.state.finalValidationPassed, true);
+  assert.deepEqual(result.action, { kind: "commit" });
+});
+
+test("returns to the exact blocked phase after validation failure", () => {
+  let state = createInitialState("session-blocked");
+  state = transition(state, "preflight");
+  state = transition(state, "analysis");
+  state = transition(state, "awaiting_plan_approval");
+  state = transition(state, "implementation", { planApproved: true });
+  state = transition(state, "review", { reviewRound: 1 });
+  state = transition(state, "final_validation");
+
+  const result = applyWorkflowSignal(state, "VALIDATION_FAILED");
+  assert.equal(result.state.phase, "blocked");
+  assert.equal(result.state.blockedFromPhase, "final_validation");
+  assert.equal(result.handled, true);
 });
 
 test("preserves state while transitioning", () => {

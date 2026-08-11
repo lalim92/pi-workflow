@@ -777,7 +777,7 @@ prompts/finalization.md
 skills/software-development/SKILL.md
 ```
 
-The initial implementation should prefer one extension file and a small number of prompt templates. Files should be split only when that improves testing or comprehension.
+The initial implementation should prefer one extension file and a small number of prompt templates. Pure Git, state, and orchestration helpers may live under `lib/` so they can be tested without starting Pi. Files should be split only when that improves testing or comprehension.
 
 The package must not depend on `pi-subagents` for version 0.1.
 
