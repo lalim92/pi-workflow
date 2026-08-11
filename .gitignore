@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.npm/
+.DS_Store
+*.log
+
+# Local Pi package and session state
+.pi/npm/
+.pi/git/
+.pi/sessions/
+.pi-subagents/

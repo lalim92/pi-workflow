@@ -1,0 +1,31 @@
+{
+  "name": "pi-workflow",
+  "version": "0.1.0",
+  "description": "Reusable development and automation workflows for Pi.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lalim92/pi-workflow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lalim92/pi-workflow/issues"
+  },
+  "homepage": "https://github.com/lalim92/pi-workflow#readme",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "workflow",
+    "developer-tools"
+  ],
+  "pi": {
+    "extensions": [
+      "workflows/software-development/extensions"
+    ],
+    "prompts": [
+      "workflows/software-development/prompts"
+    ],
+    "skills": [
+      "workflows/software-development/skills"
+    ]
+  }
+}
