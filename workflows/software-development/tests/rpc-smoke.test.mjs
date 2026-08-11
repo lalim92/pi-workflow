@@ -25,16 +25,21 @@ function createFixture() {
   return directory;
 }
 
-function runRpc(cwd, command, predicate, timeoutMs = 12_000) {
+function runRpc(cwd, command, predicate, options = {}) {
+  const timeoutMs = options.timeoutMs || 12_000;
+  const args = ["--mode", "rpc"];
+  if (options.sessionPath) {
+    args.push("--session", options.sessionPath);
+  } else if (options.sessionDir) {
+    args.push("--session-dir", options.sessionDir);
+    if (options.continueSession) args.push("--continue");
+  } else {
+    args.push("--no-session");
+  }
+  args.push("--no-extensions", "-e", extensionPath);
+
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("pi", [
-      "--mode",
-      "rpc",
-      "--no-session",
-      "--no-extensions",
-      "-e",
-      extensionPath,
-    ], { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("pi", args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
     const events = [];
     let stdout = "";
     let stderr = "";
@@ -44,11 +49,20 @@ function runRpc(cwd, command, predicate, timeoutMs = 12_000) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.stdout.destroy();
-      child.stderr.destroy();
-      child.kill("SIGTERM");
-      if (error) reject(error);
-      else resolvePromise({ events, stdout, stderr });
+      const complete = () => {
+        if (error) reject(error);
+        else resolvePromise({ events, stdout, stderr });
+      };
+      const terminate = () => {
+        child.once("exit", complete);
+        child.stdin.end();
+        setTimeout(() => {
+          if (!child.killed) child.kill("SIGTERM");
+        }, 2_000).unref();
+        setTimeout(complete, 2_250).unref();
+      };
+      const delay = error ? 0 : (options.shutdownDelayMs || 0);
+      setTimeout(terminate, delay).unref();
     };
 
     const timer = setTimeout(() => {
@@ -131,5 +145,50 @@ test("passes pre-flight on a clean repository and enters analysis", { skip: !piA
     assert.ok(hasState(result.events, "analysis"));
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("restores an active workflow from a persisted Pi session", { skip: !piAvailable }, async () => {
+  const directory = createFixture();
+  const sessionDirectory = mkdtempSync(join(tmpdir(), "pi-workflow-session-"));
+  const sessionPath = join(sessionDirectory, "workflow-session.jsonl");
+  const state = {
+    workflow: "software-development",
+    version: 1,
+    phase: "analysis",
+    sessionId: "restore-smoke",
+    repositoryRoot: directory,
+    baseBranch: "main",
+    baseCommit: "0".repeat(40),
+    requestSummary: "Persisted smoke test",
+    planSummary: "",
+    planApproved: false,
+    planRevision: 0,
+    reviewRound: 0,
+    openFindings: 0,
+    finalValidationPassed: false,
+    push: { attempted: false, completed: false },
+    pullRequest: { attempted: false, completed: false },
+    updatedAt: new Date().toISOString(),
+  };
+  writeFileSync(sessionPath, [
+    JSON.stringify({ type: "session", version: 3, id: "restore-smoke", timestamp: new Date().toISOString(), cwd: directory }),
+    JSON.stringify({ type: "custom", id: "state0001", parentId: null, timestamp: new Date().toISOString(), customType: "software-development-workflow-state", data: state }),
+    "",
+  ].join("\n"));
+  try {
+    const resumed = await runRpc(directory, {
+      id: "status",
+      type: "prompt",
+      message: "/dev-workflow status",
+    }, (event) => event.type === "extension_ui_request"
+      && event.method === "notify"
+      && String(event.message).includes("Restored active workflow"), { sessionPath });
+    assert.ok(resumed.events.some((event) => event.type === "extension_ui_request"
+      && event.method === "notify"
+      && String(event.message).includes("Restored active workflow")));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(sessionDirectory, { recursive: true, force: true });
   }
 });
