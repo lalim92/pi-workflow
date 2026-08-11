@@ -59,12 +59,20 @@ function runScriptedWorkflow(cwd) {
         reject(error);
         return;
       }
+
+      let completed = false;
+      const complete = () => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(finishTimer);
+        resolvePromise({ phases, stdout, stderr });
+      };
+      child.once("exit", complete);
       child.stdin.end();
       finishTimer = setTimeout(() => {
         if (!child.killed) child.kill("SIGTERM");
-        resolvePromise({ phases, stdout, stderr });
-      }, 500);
-      finishTimer.unref();
+        setTimeout(complete, 1_000);
+      }, 2_000);
     };
 
     const timeout = setTimeout(() => {
