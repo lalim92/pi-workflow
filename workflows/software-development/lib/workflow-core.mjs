@@ -131,6 +131,42 @@ export function branchName(request, type = "feature", issueNumber = "") {
   return `${prefix}/${issue ? `${issue}-` : ""}${slug}`;
 }
 
+export function inferBranchType(request = "") {
+  const value = request.toLowerCase();
+  if (/\b(fix|bug|bugfix|repair|resolve|correct|corrig)\b/.test(value)) return "fix";
+  if (/\b(refactor|simplif|cleanup|reorgan|restructure)\b/.test(value)) return "refactor";
+  if (/\b(document|documentation|docs|readme)\b/.test(value)) return "docs";
+  if (/\b(test|tests|testing|coverage|spec|specification)\b/.test(value)) return "test";
+  if (/\b(ci|pipeline|github actions|workflow automation)\b/.test(value)) return "ci";
+  if (/\b(perf|performance|optim|latency|speed)\b/.test(value)) return "perf";
+  if (/\b(chore|dependency|dependencies|deps|upgrade|maintenance)\b/.test(value)) return "chore";
+  return "feature";
+}
+
+export function extractIssueNumber(request = "") {
+  const match = request.match(/(?:^|\s)#(\d+)\b|\b(?:issue|ticket|task)\s*#?(\d+)\b/i);
+  return match?.[1] || match?.[2] || "";
+}
+
+export function branchNameFromRequest(request = "") {
+  const issue = extractIssueNumber(request);
+  const type = inferBranchType(request);
+  const typePrefix = {
+    fix: /^(?:fix|bugfix|repair|resolve|correct)\b[:\s-]*/i,
+    refactor: /^refactor\b[:\s-]*/i,
+    docs: /^(?:docs?|documentation)\b[:\s-]*/i,
+    test: /^(?:test|tests|testing|spec)\b[:\s-]*/i,
+    ci: /^(?:ci|pipeline)\b[:\s-]*/i,
+    perf: /^(?:perf|performance|optimi[sz]e?)\b[:\s-]*/i,
+    chore: /^(?:chore|maintenance)\b[:\s-]*/i,
+  }[type];
+  const cleanRequest = request
+    .replace(typePrefix || /$^/, "")
+    .replace(/(?:^|\s)#\d+\b/g, " ")
+    .replace(/\b(?:issue|ticket|task)\s*#?\d+\b/gi, " ");
+  return branchName(cleanRequest, type, issue);
+}
+
 export function isWriteTool(toolName) {
   return toolName === "write" || toolName === "edit";
 }

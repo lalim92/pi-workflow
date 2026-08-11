@@ -8,4 +8,5 @@ All notable changes to this project will be documented in this file.
 - Add the proposed functional specification for the `software-development` workflow.
 - Add the first functional Pi extension, phase prompts, skill guidance, and workflow-core tests.
 - Add Pi RPC smoke tests and harden signal parsing, blocked-phase recovery, and session status updates.
+- Add branch-type and issue-number inference plus guarded commit delivery helpers.
 - License the project under the BSD Zero Clause License (0BSD).

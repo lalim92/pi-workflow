@@ -1,7 +1,7 @@
 import type { AgentEndEvent, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   STATE_ENTRY_TYPE,
-  branchName,
+  branchNameFromRequest,
   compactPlan,
   createInitialState,
   extractCommitMessage,
@@ -13,6 +13,7 @@ import {
   transition,
 } from "../lib/workflow-core.mjs";
 import { inspectGitRepository } from "../lib/git-preflight.mjs";
+import { buildPullRequestBody, commitRepositoryChanges } from "../lib/git-delivery.mjs";
 
 const MAX_REVIEW_ROUNDS = 2;
 
@@ -138,7 +139,7 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
       return false;
     }
 
-    const candidate = branchName(state.requestSummary || "software change");
+    const candidate = branchNameFromRequest(state.requestSummary || "software change");
     const result = await runGit(["switch", "-c", candidate], state.repositoryRoot);
     if (result.code !== 0) {
       block(ctx, `Unable to create branch ${candidate}: ${result.stderr.trim() || "the branch may already exist"}`);
@@ -157,42 +158,23 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
   };
 
   const commitChanges = async (ctx: ExtensionContext) => {
-    const statusResult = await runGit(["status", "--porcelain=v1"], state.repositoryRoot);
-    if (statusResult.code !== 0) {
-      block(ctx, `Unable to inspect final changes: ${statusResult.stderr.trim() || "unknown error"}`);
-      return;
-    }
-    if (!statusResult.stdout.trim()) {
-      block(ctx, "Final validation passed but there are no changes to commit.");
-      return;
-    }
-
-    const diffCheck = await runGit(["diff", "--check"], state.repositoryRoot);
-    if (diffCheck.code !== 0) {
-      block(ctx, `Final diff check failed: ${diffCheck.stderr.trim() || diffCheck.stdout.trim()}`);
-      return;
-    }
-
     const message = pendingCommitMessage || `feat: implement ${state.requestSummary || "approved software change"}`;
-    const addResult = await runGit(["add", "-A"], state.repositoryRoot);
-    if (addResult.code !== 0) {
-      block(ctx, `Unable to stage final changes: ${addResult.stderr.trim() || "unknown error"}`);
+    const result = await commitRepositoryChanges((args, cwd) => runGit(args, cwd), state.repositoryRoot, {
+      expectedBranch: state.workingBranch,
+      message,
+    });
+    if (!result.ok) {
+      block(ctx, result.message);
       return;
     }
-    const commitResult = await runGit(["commit", "-m", message], state.repositoryRoot);
-    if (commitResult.code !== 0) {
-      block(ctx, `Unable to create the commit: ${commitResult.stderr.trim() || "unknown error"}`);
-      return;
-    }
-    const hashResult = await runGit(["rev-parse", "HEAD"], state.repositoryRoot);
-    const hash = hashResult.stdout.trim();
+
     setState(transition(state, "awaiting_push_confirmation", {
       finalValidationPassed: true,
-      commit: { hash, message },
+      commit: { hash: result.hash, message },
       blockedFromPhase: undefined,
       lastError: undefined,
     }));
-    notify(ctx, `Created commit ${hash.slice(0, 12)}: ${message}`);
+    notify(ctx, `Created commit ${result.hash.slice(0, 12)}: ${message}`);
     notify(ctx, "Use /dev-workflow push to request push confirmation.");
   };
 
@@ -450,7 +432,10 @@ export default function softwareDevelopmentWorkflow(pi: ExtensionAPI) {
           return;
         }
         const title = state.commit.message;
-        const body = `## Summary\n\n${state.requestSummary || "Implemented the approved software development plan."}\n\n## Validation\n\nFinal validation passed in the Pi Software Development Workflow.\n\n## Commit\n\n${state.commit.hash}`;
+        const body = buildPullRequestBody({
+          requestSummary: state.requestSummary,
+          commitHash: state.commit.hash,
+        });
         const confirmed = await ctx.ui.confirm("Create pull request", `Create a PR from ${state.workingBranch} to ${state.baseBranch}?\n\nTitle: ${title}`);
         if (!confirmed) {
           setState(transition(state, "completed", { pullRequest: { attempted: false, completed: false } }));

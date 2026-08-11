@@ -409,7 +409,7 @@ Branch creation occurs only after plan approval and before the first source modi
 
 ### 11.1 Branch naming
 
-The default prefix is selected from:
+The default prefix is inferred from the request when possible and selected from:
 
 ```text
 feature/
@@ -421,6 +421,8 @@ test/
 ci/
 perf/
 ```
+
+The inference is conservative and keyword-based. If no clear category is detected, `feature/` is used. References such as `#123`, `issue 123`, or `ticket #123` are moved into the branch prefix without being duplicated in the slug.
 
 The suffix must be lowercase kebab-case and derived from the approved request. If an issue number is available, it should appear first in the suffix:
 

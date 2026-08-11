@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { inspectGitRepository } from "../lib/git-preflight.mjs";
+import { buildPullRequestBody, commitRepositoryChanges } from "../lib/git-delivery.mjs";
 import {
   branchName,
+  branchNameFromRequest,
   canTransition,
   compactPlan,
   createInitialState,
@@ -83,6 +85,49 @@ test("accepts a clean Git repository during pre-flight", async () => {
   }
 });
 
+test("commits only on the expected branch", async () => {
+  const directory = createGitFixture();
+  try {
+    writeFileSync(join(directory, "change.txt"), "change\n");
+    const result = await commitRepositoryChanges(gitRunner, directory, {
+      expectedBranch: "main",
+      message: "feat: add fixture change",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.message, "feat: add fixture change");
+    assert.match(result.hash, /^[0-9a-f]{40}$/);
+
+    const clean = gitRunner(["status", "--porcelain=v1"], directory);
+    assert.equal(clean.stdout, "");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses to commit when the branch changed", async () => {
+  const directory = createGitFixture();
+  try {
+    gitRunner(["switch", "-c", "other"], directory);
+    writeFileSync(join(directory, "change.txt"), "change\n");
+    const result = await commitRepositoryChanges(gitRunner, directory, {
+      expectedBranch: "main",
+      message: "feat: should not commit",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "branch_mismatch");
+    assert.match(result.message, /expected main/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("builds a pull request body with the delivery context", () => {
+  const body = buildPullRequestBody({ requestSummary: "Add login", commitHash: "abc123" });
+  assert.match(body, /Add login/);
+  assert.match(body, /abc123/);
+  assert.match(body, /Final validation passed/);
+});
+
 test("refuses tracked and untracked Git changes during pre-flight", async () => {
   const directory = createGitFixture();
   try {
@@ -109,6 +154,12 @@ test("normalizes branch slugs", () => {
 
 test("uses a safe fallback for empty branch requests", () => {
   assert.equal(branchName("!!!", "unknown"), "feature/software-change");
+});
+
+test("infers branch type and issue number from a request", () => {
+  assert.equal(branchNameFromRequest("Fix timeout handling #42"), "fix/42-timeout-handling");
+  assert.equal(branchNameFromRequest("Update the README"), "docs/update-the-readme");
+  assert.equal(branchNameFromRequest("Add OAuth login"), "feature/add-oauth-login");
 });
 
 test("classifies mutating shell commands", () => {
