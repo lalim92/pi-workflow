@@ -50,6 +50,10 @@ pi install git:github.com/lalim92/pi-workflow@<tag-or-commit>
 
 During local development, load the package from a local path or use the Pi package mechanisms documented in the official Pi documentation.
 
+## License
+
+This project is released under the [BSD Zero Clause License (0BSD)](LICENSE), a permissive open-source license that allows reuse, modification, and redistribution without requiring attribution.
+
 ## Security
 
 Pi extensions execute with the permissions of the current user. Review all extension code before installing or enabling a package, especially when using workflows that can run shell commands or perform Git operations.

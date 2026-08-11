@@ -2,6 +2,7 @@
   "name": "pi-workflow",
   "version": "0.1.0",
   "description": "Reusable development and automation workflows for Pi.",
+  "license": "0BSD",
   "type": "module",
   "repository": {
     "type": "git",
